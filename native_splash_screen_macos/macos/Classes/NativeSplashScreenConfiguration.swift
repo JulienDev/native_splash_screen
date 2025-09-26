@@ -8,7 +8,21 @@ public protocol NativeSplashScreenConfigurationProvider {
     var withAnimation: Bool { get }
 
     // Image Properties
-    var imagePixels: [UInt8] { get } // ARGB Data (Little Endian)
-    var imageWidth: Int { get } // Relevant only if imagePixelData is not nil
-    var imageHeight: Int { get } // Relevant only if imagePixelData is not nil
+    var imagePixels: [UInt8] { get }
+    var imageResourceName: String { get }
+    var imageResourceExtension: String { get }
+    var retinaImageResourceName: String? { get }
+    var retinaImageResourceExtension: String? { get }
+    var imageWidth: Int { get }
+    var imageHeight: Int { get }
+}
+
+public extension NativeSplashScreenConfigurationProvider {
+    var imagePixels: [UInt8] { [] }
+
+    var imageResourceName: String { "" }
+    var imageResourceExtension: String { "" }
+
+    var retinaImageResourceName: String? { nil }
+    var retinaImageResourceExtension: String? { nil }
 }

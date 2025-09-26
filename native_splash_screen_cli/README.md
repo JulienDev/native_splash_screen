@@ -81,6 +81,11 @@ Generate the splash screen assets and native code:
 dart run native_splash_screen_cli gen
 ```
 
+On macOS targets the generator now also writes processed splash artwork files
+next to the Swift configuration files (e.g. `Release_splash.png` and
+`Release_splash@2x.png`). These images must be added to the **Runner** target in
+Xcode so that they are packaged into the application bundle.
+
 For flavor-specific builds:
 
 ```sh
