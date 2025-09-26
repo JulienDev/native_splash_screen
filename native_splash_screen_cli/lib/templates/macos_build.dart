@@ -98,6 +98,7 @@ class NativeSplashScreenConfiguration: NativeSplashScreenConfigurationProvider {
     var imageResourceExtension: String { activeConfiguration.imageResourceExtension }
     var retinaImageResourceName: String? { activeConfiguration.retinaImageResourceName }
     var retinaImageResourceExtension: String? { activeConfiguration.retinaImageResourceExtension }
+    var imagePixels: [UInt8] { activeConfiguration.imagePixels }
     var imageWidth: Int { activeConfiguration.imageWidth }
     var imageHeight: Int { activeConfiguration.imageHeight }
 }

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:image/image.dart' as img;
@@ -20,6 +21,8 @@ import '../src/image.dart';
 /// and an output [path] to override the default location.
 ///
 /// Returns [true] if generation was successful, [false] otherwise.
+final Random _pbxIdRandom = Random();
+
 Future<bool> generateMacosCode({
   required DesktopSplashConfig config,
   required String flavor,
@@ -97,6 +100,10 @@ Future<bool> _generateSourceFile({
       config: config,
       imageData: imageData,
       retinaImageData: retinaImageData,
+    );
+    await _registerAssetsWithXcodeProject(
+      runnerDir: outputDir,
+      assets: assets.registered,
     );
 
     // File header
@@ -201,6 +208,14 @@ Future<_MacosImageAssets> _writeImageAssets({
 
   String? retinaName;
   String? retinaExtension;
+  final generatedAssets = <_MacosGeneratedAsset>[
+    _MacosGeneratedAsset(
+      fileName: '$baseName.$normalizedExtension',
+      relativePath:
+          path.join('Runner', '$baseName.$normalizedExtension').replaceAll('\\', '/'),
+      fileType: _fileTypeForExtension(normalizedExtension),
+    ),
+  ];
   if (retinaImageData != null) {
     final retinaFilePath =
         path.join(outputDir, '$retinaBaseName.$normalizedExtension');
@@ -210,6 +225,15 @@ Future<_MacosImageAssets> _writeImageAssets({
 
     retinaName = retinaBaseName;
     retinaExtension = normalizedExtension;
+    generatedAssets.add(
+      _MacosGeneratedAsset(
+        fileName: '$retinaBaseName.$normalizedExtension',
+        relativePath: path
+            .join('Runner', '$retinaBaseName.$normalizedExtension')
+            .replaceAll('\\', '/'),
+        fileType: _fileTypeForExtension(normalizedExtension),
+      ),
+    );
   }
 
   return _MacosImageAssets(
@@ -217,6 +241,7 @@ Future<_MacosImageAssets> _writeImageAssets({
     resourceExtension: normalizedExtension,
     retinaResourceName: retinaName,
     retinaResourceExtension: retinaExtension,
+    registered: generatedAssets,
   );
 }
 
@@ -278,17 +303,195 @@ List<int> _encodeImage(img.Image image, String extension) {
   }
 }
 
+Future<void> _registerAssetsWithXcodeProject({
+  required String runnerDir,
+  required List<_MacosGeneratedAsset> assets,
+}) async {
+  if (assets.isEmpty) {
+    return;
+  }
+
+  final pbxprojPath = path.normalize(
+    path.join(runnerDir, '../Runner.xcodeproj/project.pbxproj'),
+  );
+  final pbxprojFile = File(pbxprojPath);
+
+  if (!pbxprojFile.existsSync()) {
+    logger.w(
+      'Unable to locate macOS project file at $pbxprojPath.\n'
+      'Add ${assets.map((a) => a.fileName).join(', ')} to the Runner target manually.',
+    );
+    return;
+  }
+
+  var content = await pbxprojFile.readAsString();
+
+  final resourcesGroupId = _findPbxSectionId(
+    content,
+    sectionType: 'PBXGroup',
+    sectionName: 'Resources',
+  );
+  final resourcesBuildPhaseId = _findPbxSectionId(
+    content,
+    sectionType: 'PBXResourcesBuildPhase',
+    sectionName: 'Resources',
+  );
+
+  if (resourcesGroupId == null || resourcesBuildPhaseId == null) {
+    logger.w(
+      'Unable to update Runner.xcodeproj with generated splash assets.\n'
+      'Add ${assets.map((a) => a.fileName).join(', ')} to the Runner target manually.',
+    );
+    return;
+  }
+
+  for (final asset in assets) {
+    if (_pbxContainsFileReference(content, asset.relativePath)) {
+      continue;
+    }
+
+    final fileRefId = _generatePbxId();
+    final buildFileId = _generatePbxId();
+
+    final fileRefEntry =
+        '                $fileRefId /* ${asset.fileName} */ = {isa = PBXFileReference; lastKnownFileType = ${asset.fileType}; name = ${asset.fileName}; path = ${asset.relativePath}; sourceTree = "<group>"; };\n';
+    final buildFileEntry =
+        '                $buildFileId /* ${asset.fileName} in Resources */ = {isa = PBXBuildFile; fileRef = $fileRefId /* ${asset.fileName} */; };\n';
+
+    content = _insertBefore(
+      content,
+      '/* End PBXFileReference section */',
+      fileRefEntry,
+    );
+    content = _insertBefore(
+      content,
+      '/* End PBXBuildFile section */',
+      buildFileEntry,
+    );
+
+    content = _addEntryToList(
+      content,
+      ownerId: resourcesGroupId,
+      ownerType: 'PBXGroup',
+      listLabel: 'children',
+      entry: '                                $fileRefId /* ${asset.fileName} */,\n',
+    );
+    content = _addEntryToList(
+      content,
+      ownerId: resourcesBuildPhaseId,
+      ownerType: 'PBXResourcesBuildPhase',
+      listLabel: 'files',
+      entry:
+          '                                $buildFileId /* ${asset.fileName} in Resources */,\n',
+    );
+  }
+
+  await pbxprojFile.writeAsString(content);
+}
+
+String? _findPbxSectionId(
+  String content, {
+  required String sectionType,
+  required String sectionName,
+}) {
+  final pattern = RegExp(
+    r'([A-F0-9]{24}) /\* ' +
+        RegExp.escape(sectionName) +
+        r' \*/ = \{\s+isa = ' +
+        sectionType +
+        r';',
+    multiLine: true,
+  );
+  final match = pattern.firstMatch(content);
+  return match?.group(1);
+}
+
+bool _pbxContainsFileReference(String content, String relativePath) {
+  final normalizedPath = relativePath.replaceAll('\\', '/');
+  return content.contains('path = $normalizedPath;');
+}
+
+String _insertBefore(String content, String marker, String insertion) {
+  final index = content.indexOf(marker);
+  if (index == -1) {
+    return content;
+  }
+  return content.replaceRange(index, index, insertion);
+}
+
+String _addEntryToList(
+  String content, {
+  required String ownerId,
+  required String ownerType,
+  required String listLabel,
+  required String entry,
+}) {
+  final ownerPattern = RegExp(
+    ownerId +
+        r' /\* .*? \*/ = \{\s+isa = ' +
+        ownerType +
+        r';[\s\S]*?' +
+        listLabel +
+        r' = \(',
+  );
+  final match = ownerPattern.firstMatch(content);
+  if (match == null) {
+    return content;
+  }
+
+  final listStart = match.end;
+  final listEnd = content.indexOf(');', listStart);
+  if (listEnd == -1) {
+    return content;
+  }
+
+  return content.replaceRange(listEnd, listEnd, entry);
+}
+
+String _generatePbxId() {
+  final buffer = StringBuffer();
+  for (var i = 0; i < 12; i++) {
+    buffer.write(_pbxIdRandom.nextInt(256).toRadixString(16).padLeft(2, '0'));
+  }
+  return buffer.toString().toUpperCase();
+}
+
+String _fileTypeForExtension(String extension) {
+  switch (extension) {
+    case 'jpg':
+      return 'image.jpeg';
+    case 'png':
+      return 'image.png';
+    default:
+      return 'image.png';
+  }
+}
+
 class _MacosImageAssets {
   final String resourceName;
   final String resourceExtension;
   final String? retinaResourceName;
   final String? retinaResourceExtension;
+  final List<_MacosGeneratedAsset> registered;
 
   const _MacosImageAssets({
     required this.resourceName,
     required this.resourceExtension,
     this.retinaResourceName,
     this.retinaResourceExtension,
+    this.registered = const [],
+  });
+}
+
+class _MacosGeneratedAsset {
+  final String fileName;
+  final String relativePath;
+  final String fileType;
+
+  const _MacosGeneratedAsset({
+    required this.fileName,
+    required this.relativePath,
+    required this.fileType,
   });
 }
 
