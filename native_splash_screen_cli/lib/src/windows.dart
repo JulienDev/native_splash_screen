@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:path/path.dart' as path;
 import 'package:yaml/yaml.dart';
 
 import '../models/desktop.dart';
@@ -85,6 +86,14 @@ DesktopSplashConfig? parseWindowsConfig(YamlMap yaml) {
     );
   }
 
+  var imageExtension = path.extension(imageFile.path).toLowerCase();
+  if (imageExtension.startsWith('.')) {
+    imageExtension = imageExtension.substring(1);
+  }
+  if (imageExtension.isEmpty) {
+    imageExtension = 'png';
+  }
+
   return DesktopSplashConfig(
     windowWidth: windowWidth,
     windowHeight: windowHeight,
@@ -92,6 +101,7 @@ DesktopSplashConfig? parseWindowsConfig(YamlMap yaml) {
     windowClass: windowsYaml['window_class'] as String? ?? 'splash_window',
     windowColor: windowColor,
     imagePath: imageFile.path,
+    imageFileExtension: imageExtension,
     imageWidth: imageWidth,
     imageHeight: imageHeight,
     imageBorderRadius: windowsYaml['image_border_radius'] as double? ?? 0.0,

@@ -33,14 +33,11 @@ public class NativeSplashScreen {
         
         let window = createSplashWindow(config: config)
         
-        if let image = createImageFromPixelBytes(bytes: config.imagePixels,
-                                                 width: config.imageWidth,
-                                                 height: config.imageHeight)
-        {
+        if let image = loadImageFromResources(config: config) {
             let imageView = createImageView(with: image, windowSize: window.frame.size)
             window.contentView?.addSubview(imageView)
         } else {
-            print("NativeSplashScreen: WARNING - Failed to create image from provided pixel data. Window will be blank.")
+            print("NativeSplashScreen: WARNING - Failed to load image resources. Window will be blank.")
         }
         
         Self.splashWindow = window
@@ -121,57 +118,6 @@ public class NativeSplashScreen {
         return window
     }
 
-    private static func createImageFromPixelBytes(bytes: [UInt8], width: Int, height: Int) -> NSImage? {
-        // Assume width and height from config are valid if imageBytes is not empty,
-        // as the protocol makes imageBytes non-optional, implying an image is always expected.
-        // The CLI should ensure width*height*4 == bytes.count.
-        guard width > 0, height > 0, !bytes.isEmpty else { return nil }
-        
-        let bitsPerComponent = 8
-        let bitsPerPixel = 32 // BGRA = 4 bytes per pixel
-        let bytesPerRow = width * 4
-        let expectedTotalBytes = bytesPerRow * height
-
-        guard bytes.count == expectedTotalBytes else {
-            print("NativeSplashScreen: ERROR - Pixel data size (\(bytes.count)) does not match expected size (\(expectedTotalBytes)) for \(width)x\(height) image.")
-            return nil
-        }
-
-        // Convert [UInt8] to Data for CGDataProvider
-        let data = Data(bytes)
-
-        let cgImage = data.withUnsafeBytes { (unsafeRawBufferPointer: UnsafeRawBufferPointer) -> CGImage? in
-            guard let baseAddress = unsafeRawBufferPointer.baseAddress else { return nil }
-            
-            guard let providerRef = CGDataProvider(dataInfo: nil, data: baseAddress, size: data.count, releaseData: { _, _, _ in }) else { return nil }
-
-            // This assumes your bytes are in B, G, R, A order from Dart.
-            let bitmapInfo: CGBitmapInfo = [
-                CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue), // Alpha is considered the "first" component after little-endian interpretation.
-                CGBitmapInfo.byteOrder32Little // BGRA byte streams on little-endian macOS
-            ]
-
-            return CGImage(
-                width: width,
-                height: height,
-                bitsPerComponent: bitsPerComponent,
-                bitsPerPixel: bitsPerPixel,
-                bytesPerRow: bytesPerRow,
-                space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: bitmapInfo,
-                provider: providerRef,
-                decode: nil,
-                shouldInterpolate: true,
-                intent: .defaultIntent
-            )
-        }
-        
-        if let validCGImage = cgImage {
-            return NSImage(cgImage: validCGImage, size: NSSize(width: width, height: height))
-        }
-        return nil
-    }
-
     private static func createImageView(with image: NSImage, windowSize: NSSize) -> NSImageView {
         let imageView = NSImageView(image: image)
         imageView.imageScaling = .scaleProportionallyUpOrDown // Sensible default
@@ -195,5 +141,54 @@ public class NativeSplashScreen {
             window.alphaValue = 1.0
             window.makeKeyAndOrderFront(nil)
         }
+    }
+
+    private static func loadImageFromResources(config: NativeSplashScreenConfigurationProvider) -> NSImage? {
+        let baseName = config.imageResourceName
+        let baseExtension = config.imageResourceExtension
+
+        guard !baseName.isEmpty else {
+            print("NativeSplashScreen: ERROR - Missing image resource name in configuration.")
+            return nil
+        }
+
+        guard let baseURL = Bundle.main.url(forResource: baseName, withExtension: baseExtension) else {
+            print("NativeSplashScreen: ERROR - Unable to locate image resource \(baseName).\(baseExtension) in bundle.")
+            return nil
+        }
+
+        guard let baseData = try? Data(contentsOf: baseURL),
+              let baseRepresentation = NSBitmapImageRep(data: baseData) else {
+            print("NativeSplashScreen: ERROR - Unable to decode image resource \(baseName).\(baseExtension).")
+            return nil
+        }
+
+        let configuredWidth = CGFloat(max(config.imageWidth, 0))
+        let configuredHeight = CGFloat(max(config.imageHeight, 0))
+        let representationSize: NSSize
+        if configuredWidth > 0.0 && configuredHeight > 0.0 {
+            representationSize = NSSize(width: configuredWidth, height: configuredHeight)
+        } else {
+            representationSize = NSSize(width: CGFloat(baseRepresentation.pixelsWide), height: CGFloat(baseRepresentation.pixelsHigh))
+        }
+
+        baseRepresentation.size = representationSize
+
+        let image = NSImage(size: representationSize)
+        image.addRepresentation(baseRepresentation)
+
+        if let retinaName = config.retinaImageResourceName {
+            let retinaExtension = config.retinaImageResourceExtension ?? baseExtension
+            if let retinaURL = Bundle.main.url(forResource: retinaName, withExtension: retinaExtension),
+               let retinaData = try? Data(contentsOf: retinaURL),
+               let retinaRepresentation = NSBitmapImageRep(data: retinaData) {
+                retinaRepresentation.size = representationSize
+                image.addRepresentation(retinaRepresentation)
+            } else {
+                print("NativeSplashScreen: WARNING - Unable to load retina image resource \(retinaName).\(retinaExtension). Using base representation only.")
+            }
+        }
+
+        return image
     }
 }

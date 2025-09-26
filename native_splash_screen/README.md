@@ -183,6 +183,11 @@ The `gen` command creates these files in `[YourApp]/macos/Runner/`:
 - `NativeSplashScreen_Profile.swift`
 - `NativeSplashScreen_Release.swift`
 
+You will also see the generated splash artwork in the same folder (for example
+`Release_splash.png` and its retina counterpart `Release_splash@2x.png`). Add
+these images to the **Runner** target so that `Bundle.main` can load them when
+the splash screen is displayed.
+
 Follow these visual steps to add them to Xcode:
 
 **1** - click on **`01`** then **`02`**.

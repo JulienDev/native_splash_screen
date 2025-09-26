@@ -8,6 +8,9 @@ class DesktopSplashConfig {
   final String windowClass;
   final Color windowColor;
   final String imagePath;
+  /// Normalized image file extension (e.g. `png` or `jpg`) used when exporting
+  /// generated assets.
+  final String imageFileExtension;
   final int imageWidth;
   final int imageHeight;
   final double imageBorderRadius;
@@ -24,6 +27,7 @@ class DesktopSplashConfig {
     required this.windowClass,
     required this.windowColor,
     required this.imagePath,
+    required this.imageFileExtension,
     required this.imageWidth,
     required this.imageHeight,
     required this.imageBorderRadius,
